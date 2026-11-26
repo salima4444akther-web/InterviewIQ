@@ -141,6 +141,7 @@ class InterviewCreate(BaseModel):
     focus_competency: str = Field(default="Mixed", min_length=1, max_length=80)
     ai_consent: bool = False
     mode: Literal["structured", "conversational"] = "structured"
+    auto_start: bool = False
 
 
 class AnswerSubmit(BaseModel):
@@ -1371,7 +1372,7 @@ def list_interviews(user: dict[str, str] = Depends(require_user)) -> list[dict[s
 
 
 @app.post("/api/interviews", status_code=201)
-def create_interview(
+async def create_interview(
     config: InterviewCreate,
     user: dict[str, str] = Depends(require_user),
 ) -> dict[str, Any]:
@@ -1387,6 +1388,7 @@ def create_interview(
         raise HTTPException(status_code=422, detail="Choose a focus area supported by the selected interview type.")
     config_data = config.model_dump()
     config_data["role"] = role
+    auto_start = config_data.pop("auto_start", False)
     session = {
         "id": str(uuid.uuid4()),
         "owner_id": user["id"],
@@ -1403,6 +1405,26 @@ def create_interview(
         "messages": [],
         "report": None,
     }
+    if auto_start:
+        session["status"] = "active"
+        session["started_at"] = now()
+        if session["config"].get("mode") == "conversational":
+            opening = await create_conversational_opening(session)
+            session["messages"] = [
+                {
+                    "id": str(uuid.uuid4()),
+                    "role": "assistant",
+                    "content": opening,
+                    "timestamp": now(),
+                }
+            ]
+        else:
+            try:
+                question = await create_primary_question(session)
+            except AIServiceError as error:
+                raise_ai_http_error(error)
+            if question is None:
+                raise HTTPException(status_code=409, detail="This interview has no remaining questions.")
     save_session(session)
     return session
 

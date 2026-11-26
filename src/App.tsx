@@ -569,7 +569,14 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
       setActiveSession(session);
       setPage("interview");
     } catch (error) {
-      setNotice({ kind: "error", text: (error as Error).message });
+      const msg = (error as Error).message;
+      setNotice({
+        kind: "error",
+        text: msg.includes("not found")
+          ? "This session is no longer available in temporary server storage. Please click 'New practice' to start a fresh interview!"
+          : msg,
+      });
+      await refresh().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -587,7 +594,14 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
       setReport(nextReport);
       setPage("report");
     } catch (error) {
-      setNotice({ kind: "error", text: (error as Error).message });
+      const msg = (error as Error).message;
+      setNotice({
+        kind: "error",
+        text: msg.includes("not found")
+          ? "This report is no longer available in temporary server storage. Start a new session to practice!"
+          : msg,
+      });
+      await refresh().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -717,14 +731,11 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
               setBusy(true);
               setNotice(null);
               try {
-                const created = await request<InterviewSession>("/api/interviews", {
+                const session = await request<InterviewSession>("/api/interviews", {
                   method: "POST",
-                  body: JSON.stringify(config),
+                  body: JSON.stringify({ ...config, auto_start: true }),
                 });
-                const started = await request<InterviewSession>(`/api/interviews/${created.id}/start`, {
-                  method: "POST",
-                });
-                setActiveSession(started);
+                setActiveSession(session);
                 setPage("interview");
                 await refresh();
               } catch (error) {
