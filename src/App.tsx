@@ -123,6 +123,7 @@ type CoachStatus = { coach: "openrouter" | "groq" | "local"; model: string };
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? "";
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() ?? "";
+const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL?.trim() ?? "").replace(/\/+$/, "");
 let apiAccessToken: string | null = null;
 
 const defaultProfile: Profile = {
@@ -136,7 +137,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Content-Type", "application/json");
   if (apiAccessToken) headers.set("Authorization", `Bearer ${apiAccessToken}`);
-  const response = await fetch(path, {
+  const targetUrl = path.startsWith("http://") || path.startsWith("https://")
+    ? path
+    : `${apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  const response = await fetch(targetUrl, {
     ...init,
     headers,
   });

@@ -18,7 +18,12 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent
 load_dotenv(ROOT.parent / ".env")
-DB_PATH = ROOT / "data" / "interviewiq.sqlite3"
+DB_PATH = Path(
+    os.environ.get(
+        "DB_PATH",
+        str(Path("/tmp") / "interviewiq.sqlite3") if os.environ.get("VERCEL") else str(ROOT / "data" / "interviewiq.sqlite3")
+    )
+)
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "").rstrip("/")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
@@ -98,12 +103,19 @@ TECHNICAL_FOLLOW_UPS = {
 }
 
 app = FastAPI(title="InterviewIQ Prototype API", version="0.1.0")
+default_origins = [
+    "http://127.0.0.1:5187",
+    "http://localhost:5187",
+]
+extra_origins = [o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()]
+if "*" in extra_origins or os.environ.get("VERCEL"):
+    cors_origins = ["*"]
+else:
+    cors_origins = list(dict.fromkeys(default_origins + extra_origins))
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://127.0.0.1:5187",
-        "http://localhost:5187",
-    ],
+    allow_origins=cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
