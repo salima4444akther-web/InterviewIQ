@@ -1097,7 +1097,7 @@ function SetupPage({ profile, busy, coachStatus, onBack, onStart }: {
   const [duration, setDuration] = useState(15);
   const [interviewType, setInterviewType] = useState<"Behavioral" | "Technical">("Behavioral");
   const [focus, setFocus] = useState("Mixed");
-  const [aiConsent, setAiConsent] = useState(false);
+  const [aiConsent, setAiConsent] = useState(true);
   const [mode, setMode] = useState<"structured" | "conversational">("conversational");
   const [roleError, setRoleError] = useState("");
 
@@ -1167,16 +1167,15 @@ function SetupPage({ profile, busy, coachStatus, onBack, onStart }: {
             <div className="mode-desc">Step-by-step interview questions. Get immediate rubric scores and follow-ups after each individual answer.</div>
           </button>
         </div>
-        {coachStatus?.coach && coachStatus.coach !== "local" ? (
-          <div className="coach-consent">
-            <label>
-              <input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} />
-              <span><strong>Use {coachStatus.coach === "groq" ? "Groq" : "OpenRouter"} AI coaching for this session (optional)</strong><small>If selected, your role, questions, and answers (including prior turns) are sent to {coachStatus.coach === "groq" ? "Groq" : "OpenRouter"} for question generation and feedback. Your name and profile are not sent. Otherwise, the session uses local templates and rule-based coaching.</small></span>
-            </label>
-          </div>
-        ) : (
-          <div className="privacy-note"><CheckCircle2 size={17} /><span>This session uses local question templates and rule-based coaching. Your practice data is stored on this computer.</span></div>
-        )}
+        <div className="coach-consent active-consent">
+          <label>
+            <input type="checkbox" checked={aiConsent} onChange={(event) => setAiConsent(event.target.checked)} />
+            <span>
+              <strong>⚡ Interactive Groq AI Interviewer Active ({coachStatus?.coach === "groq" ? (coachStatus.model || "qwen/qwen3.8-27b") : "Groq AI"})</strong>
+              <small>Real-time conversational intelligence powered by Groq LPU. Dynamic scenario generation, natural greetings, interactive trade-off probing, and comprehensive end-of-interview scorecard.</small>
+            </span>
+          </label>
+        </div>
         <button className="button button-primary button-wide" disabled={busy} type="submit">{busy ? <LoaderCircle className="spin" size={17} /> : <Sparkles size={17} />} Start my interview <ArrowRight size={16} /></button>
       </form>
     </div>

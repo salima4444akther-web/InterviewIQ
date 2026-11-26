@@ -29,7 +29,7 @@ SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY", "")
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-4-hydrogen")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
-GROQ_MODEL = os.environ.get("GROQ_MODEL", "qwen/qwen3.8-27b")
+GROQ_MODEL = os.environ.get("GROQ_MODEL") or "qwen/qwen3.8-27b" 
 
 
 def is_ai_configured() -> bool:
@@ -202,6 +202,7 @@ async def openrouter_json(system_prompt: str, user_prompt: str) -> dict[str, Any
         headers = {
             "Authorization": f"Bearer {GROQ_API_KEY}",
             "Content-Type": "application/json",
+            "User-Agent": "InterviewIQ-Coach/1.0",
         }
         payload = {
             "model": GROQ_MODEL,
@@ -970,54 +971,121 @@ async def create_follow_up(
 
 
 
+
+async def call_ai_chat(
+    system_prompt: str,
+    messages: list[dict[str, Any]],
+    temperature: float = 0.7,
+    max_tokens: int = 1024,
+) -> str:
+    """Make a direct conversational chat completion call to Groq or OpenRouter."""
+    if not (GROQ_API_KEY or OPENROUTER_API_KEY):
+        raise AIServiceError("Neither Groq nor OpenRouter is configured.")
+
+    coach_type, _ = get_ai_coach_info()
+    chat_messages = [{"role": "system", "content": system_prompt}]
+    for m in messages:
+        role = "assistant" if m.get("role") == "assistant" else "user"
+        content = m.get("content", "").strip()
+        if content:
+            chat_messages.append({"role": role, "content": content})
+
+    if coach_type == "groq":
+        endpoint = "https://api.groq.com/openai/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {GROQ_API_KEY}",
+            "Content-Type": "application/json",
+            "User-Agent": "InterviewIQ-Coach/1.0",
+        }
+        payload = {
+            "model": GROQ_MODEL,
+            "messages": chat_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        provider_name = "Groq"
+    else:
+        endpoint = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "http://127.0.0.1:5187",
+            "X-OpenRouter-Title": "InterviewIQ",
+            "User-Agent": "InterviewIQ-Coach/1.0",
+        }
+        payload = {
+            "model": OPENROUTER_MODEL,
+            "messages": chat_messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+        }
+        provider_name = "OpenRouter"
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(45.0, connect=10.0), verify=False) as client:
+            response = await client.post(endpoint, headers=headers, json=payload)
+    except httpx.TimeoutException as error:
+        raise AIServiceError(f"The {provider_name} AI coach timed out. Please try again.") from error
+    except httpx.HTTPError as error:
+        raise AIServiceError(f"The {provider_name} AI coach is temporarily unreachable. Please try again.") from error
+
+    if response.status_code in (401, 403):
+        raise AIServiceError(f"The {provider_name} API key was rejected. Check your API key.")
+    if response.status_code == 429:
+        raise AIServiceError(f"The {provider_name} request limit was reached. Please retry shortly.")
+    if response.is_error:
+        raise AIServiceError(f"AI service error ({response.status_code}): {response.text[:200]}")
+
+    body = response.json()
+    choices = body.get("choices", [])
+    if not choices:
+        raise AIServiceError("The AI coach returned an empty response.")
+    reply = choices[0].get("message", {}).get("content", "").strip()
+    if not reply:
+        raise AIServiceError("The AI coach returned empty content.")
+    return reply
+
+
 async def create_conversational_opening(session: dict[str, Any]) -> str:
-    role = session["config"]["role"]
-    interview_type = session["config"]["interview_type"]
-    focus = session["config"]["focus_competency"]
-    difficulty = session["config"]["difficulty"]
-    if is_ai_configured() and session["config"].get("ai_consent", False):
-        require_ai_consent(session)
-        technical = interview_type == "Technical"
-        system_prompt = (
-            (
-                "You are an elite, warm, and highly experienced Staff Technical Interviewer at a premier technology company. "
-                "Write your opening greeting and the opening scenario/problem for the candidate. "
-                "1. Greet the candidate warmly and state the role and focus of today's conversation. "
-                "2. Present a realistic, compelling engineering problem with tangible production constraints (e.g., scale, latency, throughput, consistency) tailored to the role, difficulty, and focus. "
-                "3. Explicitly invite the candidate to share their initial thoughts, clarify requirements, or ask any questions about constraints before diving deep. "
-            ) if technical else (
-                "You are an elite, warm, and highly experienced Staff Behavioral Interview Coach at a premier technology company. "
-                "Write your opening greeting and initial scenario for the candidate. "
-                "1. Greet the candidate warmly and state the role and focus of today's conversation. "
-                "2. Frame an open-ended, high-signal leadership or collaboration scenario focusing on authentic ownership and impact. "
-                "3. Invite them to set the context and walk you through their experience. "
-            )
-        ) + (
-            "Keep the tone encouraging, conversational, and professional. Return a JSON object with one string field named 'message'."
-        )
-        user_prompt = json.dumps({
-            "role": role,
-            "interview_type": interview_type,
-            "difficulty": difficulty,
-            "focus": focus,
-        })
+    role = session["config"].get("role", "Software Engineer")
+    focus = session["config"].get("focus_competency", "System design")
+    difficulty = session["config"].get("difficulty", "Intermediate")
+    interview_type = session["config"].get("interview_type", "Technical")
+    technical = is_technical(session)
+
+    system_prompt = (
+        f"You are Alex, an elite, warm, and highly perceptive Staff {'Technical' if technical else 'Behavioral'} Interviewer "
+        f"at a top technology company (like Google or Stripe). "
+        f"Write your live opening greeting and present the opening scenario for the candidate interviewing for {role} "
+        f"(Focus area: {focus}, Level: {difficulty}).\n\n"
+        "GUIDELINES:\n"
+        "1. Greet the candidate warmly and authentically, introduce yourself (Alex, Staff Interviewer), and state today's focus.\n"
+        "2. Present a compelling, realistic production scenario with concrete constraints tailored to the role and focus.\n"
+        "3. Explicitly invite the candidate to share their initial thoughts, ask clarifying questions, or discuss constraints.\n"
+        "4. Tone must be encouraging, natural, and conversational (1 to 2 focused paragraphs). No bullet lists or robotic templates."
+    )
+
+    if is_ai_configured() and session["config"].get("ai_consent", True):
         try:
-            payload = await openrouter_json(system_prompt, user_prompt)
-            msg = payload.get("message") or payload.get("text")
-            if msg:
-                return msg.strip()
+            opening = await call_ai_chat(
+                system_prompt,
+                [{"role": "user", "content": f"Hi Alex, I am ready for our {role} interview focusing on {focus}."}],
+                temperature=0.7,
+            )
+            if opening:
+                return opening
         except Exception:
             pass
 
-    if interview_type == "Technical":
+    if technical:
         return (
-            f"Hi! Thanks for joining me today. I'm excited to speak with you about the {role} position. "
-            f"Today, we'll explore a real-world scenario focusing on {focus}. "
+            f"Hi! Thanks for joining me today. I'm Alex, a Staff Engineer here, and I'm excited to speak with you about the {role} position. "
+            f"Today, we'll explore a real-world scenario focusing on {focus} ({difficulty} level). "
             "Imagine we need to design a high-throughput, low-latency notification delivery system handling millions of requests per day. "
             "To begin, how would you approach the high-level architecture, and what clarifying questions do you have about the scale or constraints?"
         )
     return (
-        f"Hi! It's great to meet you today. Thank you for taking the time to interview for the {role} position. "
+        f"Hi! It's great to meet you today. I'm Alex, and thank you for taking the time to interview for the {role} position. "
         f"Today we'll be focusing on {focus} and navigating complex engineering team dynamics. "
         "To kick things off, could you tell me about a time you had to lead a project through significant technical ambiguity or high stakeholder pressure? "
         "Feel free to set the context and walk me through your thinking."
@@ -1026,61 +1094,53 @@ async def create_conversational_opening(session: dict[str, Any]) -> str:
 
 async def generate_conversational_reply(session: dict[str, Any]) -> str:
     messages = session.get("messages", [])
-    if is_ai_configured() and session["config"].get("ai_consent", False):
-        require_ai_consent(session)
-        technical = is_technical(session)
-        system_prompt = (
-            (
-                "You are an elite, perceptive, and supportive Staff Technical Interviewer at a premier technology company conducting a natural conversational interview. "
-                f"You are interviewing the candidate for the role of {session['config']['role']} (Focus: {session['config']['focus_competency']}, Difficulty: {session['config']['difficulty']}). "
-                "Guidelines: "
-                "1. Converse naturally like an authentic, highly skilled human interviewer. Acknowledge and validate good ideas or clever observations made by the candidate. "
-                "2. If the candidate asks clarifying questions or asks about system constraints/scale, answer them clearly and realistically. "
-                "3. Probe deeper: challenge unaddressed edge cases, race conditions, trade-offs, failure modes, or architectural layers naturally. "
-                "4. Keep your responses concise (2-3 paragraphs maximum), engaging, and conversational—never robotic, rigid, or like a grading rubric. "
-                "5. When you feel the topic has been thoroughly explored (usually after 4 or more back-and-forth exchanges), warmly let the candidate know they have covered the core aspects and can conclude the interview when ready to review their scorecard. "
-                "Return one JSON object with: "
-                "reply (string: your conversational spoken reply to the candidate), and "
-                "suggest_conclusion (boolean: true if candidate has thoroughly covered the topic; false otherwise)."
-            ) if technical else (
-                "You are an elite, perceptive, and supportive Staff Behavioral Interview Coach at a premier technology company conducting an interactive conversational interview. "
-                f"You are interviewing the candidate for the role of {session['config']['role']} (Focus: {session['config']['focus_competency']}, Difficulty: {session['config']['difficulty']}). "
-                "Guidelines: "
-                "1. Converse naturally like an authentic, empathetic executive interviewer. Acknowledge what the candidate shared. "
-                "2. Ask probing, thoughtful follow-ups that explore their personal agency ('What specifically was your role in that decision?'), stakeholder conflict, or measurable outcomes. "
-                "3. Keep your responses concise (2-3 paragraphs maximum), engaging, and conversational. "
-                "4. When the scenario has been thoroughly explored, warmly let the candidate know they can conclude the interview when ready. "
-                "Return one JSON object with: "
-                "reply (string: your conversational spoken reply to the candidate), and "
-                "suggest_conclusion (boolean: true if candidate has thoroughly covered the topic; false otherwise)."
-            )
-        )
-        user_prompt = json.dumps(
-            {
-                "conversation_history": [
-                    {"role": m["role"], "content": m["content"]}
-                    for m in messages
-                ],
-                "latest_user_message": messages[-1]["content"] if messages else "",
-            },
-            ensure_ascii=True,
-        )
+    role = session["config"].get("role", "Software Engineer")
+    focus = session["config"].get("focus_competency", "System design")
+    difficulty = session["config"].get("difficulty", "Intermediate")
+    interview_type = session["config"].get("interview_type", "Technical")
+    technical = is_technical(session)
+
+    system_prompt = (
+        f"You are Alex, an elite, highly perceptive, and warm Staff {'Technical' if technical else 'Behavioral'} Interviewer "
+        f"at a premier tech company (such as Google or Stripe). "
+        f"You are conducting a live, interactive, conversational interview for the role of {role} "
+        f"(Focus Area: {focus}, Level: {difficulty}).\n\n"
+        "INTERVIEWER GUIDELINES:\n"
+        "1. Dynamic, Real-Time Interactivity: Converse naturally like an authentic senior engineer or hiring manager. "
+        "Listen carefully to what the candidate just said and respond directly to their specific words and ideas.\n"
+        "2. Greetings & Salutations: If the candidate says 'hi', 'hello', 'hey', 'good morning', asks how you are, "
+        "or offers any casual greeting, ALWAYS greet them back warmly in your reply (e.g., 'Hello! Great to connect with you today...'), "
+        "introduce yourself, acknowledge their greeting, and ask how they are doing or if they're ready to dive in.\n"
+        "3. Questions & Clarifications: If the candidate asks about requirements, expected scale, constraints, or database schemas, "
+        "provide realistic engineering details and encourage them on how to design around them.\n"
+        "4. Technical & Behavioral Deep-Dive: When the candidate suggests a solution or shares an experience, "
+        "validate what is clever or sound, and then probe the critical trade-offs (e.g. data consistency, caching invalidation, failure recovery, scale, or personal agency).\n"
+        "5. Pacing & Tone: Keep your spoken reply concise, natural, and engaging (1 to 2 focused paragraphs). "
+        "Never output rigid grading rubrics, JSON tags, or canned textbook answers. Converse genuinely with the candidate.\n"
+        "6. Wrapping Up: When you have covered 4 or more deep technical exchanges and explored the core trade-offs thoroughly, "
+        "warmly let the candidate know they've done a great job exploring the problem and can conclude the session whenever they are ready to review their scorecard."
+    )
+
+    if is_ai_configured() and session["config"].get("ai_consent", True):
         try:
-            payload = await openrouter_json(system_prompt, user_prompt)
-            reply = payload.get("reply") or payload.get("text")
-            if reply:
-                return reply.strip()
+            return await call_ai_chat(system_prompt, messages, temperature=0.7)
         except Exception:
             pass
 
-    turn_count = len([m for m in messages if m["role"] == "user"])
-    if turn_count == 1:
-        return "That's a solid starting foundation. Could you walk me through the key trade-offs you considered for that approach, especially around performance, reliability, and scale?"
-    elif turn_count == 2:
-        return "Good insights. Now let's explore failure modes. How would your design handle sudden traffic spikes or unexpected dependency outages?"
-    elif turn_count == 3:
-        return "I appreciate the detailed explanation. How would you test and verify this solution before rolling it out to production?"
-    return "We've covered some great ground on this topic! Feel free to share any final thoughts, or you can conclude the interview whenever you're ready to review your full scorecard and feedback."
+    # Dynamic situational fallback:
+    latest_user = messages[-1]["content"] if messages else ""
+    lower_user = latest_user.lower().strip()
+    if any(lower_user.startswith(w) or lower_user == w for w in ("hi", "hello", "hey", "good morning", "good afternoon", "good evening", "how are you")):
+        return (
+            f"Hello! It's wonderful to meet you. I'm Alex, your interviewer today for the {role} position. "
+            f"I'm excited to explore {focus} with you. How are you doing today? "
+            "Whenever you're ready, we can jump into our scenario or address any initial questions you might have!"
+        )
+    return (
+        f"That's an interesting point regarding your approach. "
+        f"Looking at our {focus} challenge for the {role} position, what key trade-offs around scalability, "
+        "latency, or system reliability stand out to you most?"
+    )
 
 
 async def evaluate_conversational_transcript(session: dict[str, Any]) -> dict[str, Any]:
