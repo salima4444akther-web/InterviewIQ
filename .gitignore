@@ -1,0 +1,12 @@
+node_modules/
+dist/
+backend/data/
+*.sqlite3
+__pycache__/
+*/__pycache__/
+.pytest_cache/
+*.py[cod]
+.env
+.env.*
+!.env.example
+.venv/
