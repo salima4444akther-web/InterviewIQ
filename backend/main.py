@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Body, Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
@@ -393,12 +393,12 @@ def save_session(session: dict[str, Any]) -> None:
             """INSERT INTO interview_sessions (id, owner_id, status, created_at, data)
                VALUES (?, ?, ?, ?, ?)
                ON CONFLICT(id) DO UPDATE SET
+                   owner_id=coalesce(excluded.owner_id, interview_sessions.owner_id),
                    status=excluded.status,
-                   data=excluded.data
-               WHERE interview_sessions.owner_id=excluded.owner_id""",
+                   data=excluded.data""",
             (
                 session["id"],
-                session["owner_id"],
+                session.get("owner_id"),
                 session["status"],
                 session["created_at"],
                 json.dumps(session),
@@ -444,12 +444,18 @@ async def require_user(authorization: str | None = Header(default=None)) -> dict
 def load_session(session_id: str, user_id: str) -> dict[str, Any]:
     with connect() as connection:
         row = connection.execute(
-            "SELECT data FROM interview_sessions WHERE id = ? AND owner_id = ?",
-            (session_id, user_id),
+            "SELECT data, owner_id FROM interview_sessions WHERE id = ?",
+            (session_id,),
         ).fetchone()
     if row is None:
         raise HTTPException(status_code=404, detail="Interview session not found.")
-    return json.loads(row["data"])
+    if row["owner_id"] is not None and row["owner_id"] != user_id:
+        raise HTTPException(status_code=404, detail="Interview session not found.")
+    session = json.loads(row["data"])
+    if row["owner_id"] is None:
+        session["owner_id"] = user_id
+        save_session(session)
+    return session
 
 
 def words(text: str) -> list[str]:
@@ -1435,6 +1441,18 @@ def get_interview(
     user: dict[str, str] = Depends(require_user),
 ) -> dict[str, Any]:
     return load_session(session_id, user["id"])
+
+
+@app.post("/api/interviews/restore")
+def restore_interview(
+    payload: dict[str, Any] = Body(...),
+    user: dict[str, str] = Depends(require_user),
+) -> dict[str, Any]:
+    if not isinstance(payload, dict) or "id" not in payload:
+        raise HTTPException(status_code=422, detail="Invalid session payload.")
+    payload["owner_id"] = user["id"]
+    save_session(payload)
+    return payload
 
 
 @app.post("/api/interviews/{session_id}/start")

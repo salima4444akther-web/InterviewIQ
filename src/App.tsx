@@ -137,6 +137,43 @@ const supabaseAnonKey =
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL?.trim() ?? "").replace(/\/+$/, "");
 let apiAccessToken: string | null = null;
 
+const SESSIONS_CACHE_KEY = "interviewiq_cached_sessions";
+
+function getCachedSessions(): InterviewSession[] {
+  try {
+    const raw = localStorage.getItem(SESSIONS_CACHE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function cacheSession(session: InterviewSession) {
+  try {
+    const existing = getCachedSessions().filter((s) => s.id !== session.id);
+    localStorage.setItem(SESSIONS_CACHE_KEY, JSON.stringify([session, ...existing].slice(0, 50)));
+  } catch {}
+}
+
+function removeCachedSession(id: string) {
+  try {
+    const remaining = getCachedSessions().filter((s) => s.id !== id);
+    localStorage.setItem(SESSIONS_CACHE_KEY, JSON.stringify(remaining));
+  } catch {}
+}
+
+async function restoreSessionIfNeeded(session: InterviewSession): Promise<boolean> {
+  try {
+    await request<InterviewSession>("/api/interviews/restore", {
+      method: "POST",
+      body: JSON.stringify(session),
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const defaultProfile: Profile = {
   name: "Candidate",
   target_role: "",
@@ -531,15 +568,28 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
 
   const refresh = async () => {
     const [nextProfile, nextSessions, nextProgress, nextCoachStatus] = await Promise.all([
-      request<Profile>("/api/profile"),
-      request<InterviewSession[]>("/api/interviews"),
-      request<ProgressData>("/api/progress"),
-      request<CoachStatus>("/api/health"),
+      request<Profile>("/api/profile").catch(() => null),
+      request<InterviewSession[]>("/api/interviews").catch(() => []),
+      request<ProgressData>("/api/progress").catch(() => null),
+      request<CoachStatus>("/api/health").catch(() => null),
     ]);
-    setProfile(nextProfile);
-    setSessions(nextSessions);
-    setProgress(nextProgress);
-    setCoachStatus(nextCoachStatus);
+    if (nextProfile) setProfile(nextProfile);
+
+    // Merge server sessions with client-cached sessions
+    const cached = getCachedSessions();
+    const map = new Map<string, InterviewSession>();
+    for (const s of cached) map.set(s.id, s);
+    if (Array.isArray(nextSessions)) {
+      for (const s of nextSessions) {
+        map.set(s.id, s);
+        cacheSession(s);
+      }
+    }
+    const merged = Array.from(map.values()).sort((a, b) => b.created_at.localeCompare(a.created_at));
+    setSessions(merged);
+
+    if (nextProgress) setProgress(nextProgress);
+    if (nextCoachStatus) setCoachStatus(nextCoachStatus);
   };
 
   useEffect(() => {
@@ -562,21 +612,32 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
     setBusy(true);
     setNotice(null);
     try {
-      let session = await request<InterviewSession>(`/api/interviews/${id}`);
+      let session: InterviewSession;
+      try {
+        session = await request<InterviewSession>(`/api/interviews/${id}`);
+      } catch (err) {
+        // If container recycled, attempt auto-restore from cache
+        const local = getCachedSessions().find((s) => s.id === id);
+        if (local) {
+          await restoreSessionIfNeeded(local);
+          session = local;
+        } else {
+          throw err;
+        }
+      }
       if (session.status === "draft") {
         session = await request<InterviewSession>(`/api/interviews/${id}/start`, { method: "POST" });
       }
+      cacheSession(session);
       setActiveSession(session);
       setPage("interview");
     } catch (error) {
-      const msg = (error as Error).message;
+      removeCachedSession(id);
+      setSessions((prev) => prev.filter((s) => s.id !== id));
       setNotice({
-        kind: "error",
-        text: msg.includes("not found")
-          ? "This session is no longer available in temporary server storage. Please click 'New practice' to start a fresh interview!"
-          : msg,
+        kind: "info",
+        text: "That previous practice session expired from server memory. Click 'New practice' to start a fresh interview!",
       });
-      await refresh().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -586,22 +647,34 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
     setBusy(true);
     setNotice(null);
     try {
-      const [nextSession, nextReport] = await Promise.all([
-        request<InterviewSession>(`/api/interviews/${id}`),
-        request<Report>(`/api/interviews/${id}/report`),
-      ]);
+      let nextSession: InterviewSession;
+      let nextReport: Report;
+      try {
+        [nextSession, nextReport] = await Promise.all([
+          request<InterviewSession>(`/api/interviews/${id}`),
+          request<Report>(`/api/interviews/${id}/report`),
+        ]);
+      } catch (err) {
+        const local = getCachedSessions().find((s) => s.id === id);
+        if (local && local.report) {
+          await restoreSessionIfNeeded(local);
+          nextSession = local;
+          nextReport = local.report;
+        } else {
+          throw err;
+        }
+      }
+      cacheSession(nextSession);
       setActiveSession(nextSession);
       setReport(nextReport);
       setPage("report");
     } catch (error) {
-      const msg = (error as Error).message;
+      removeCachedSession(id);
+      setSessions((prev) => prev.filter((s) => s.id !== id));
       setNotice({
-        kind: "error",
-        text: msg.includes("not found")
-          ? "This report is no longer available in temporary server storage. Start a new session to practice!"
-          : msg,
+        kind: "info",
+        text: "That session report expired from server memory. Click 'New practice' to start a fresh interview!",
       });
-      await refresh().catch(() => {});
     } finally {
       setBusy(false);
     }
@@ -612,10 +685,24 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
     setBusy(true);
     setNotice(null);
     try {
-      const updated = await request<InterviewSession>(`/api/interviews/${activeSession.id}/chat`, {
-        method: "POST",
-        body: JSON.stringify({ message: text }),
-      });
+      let updated: InterviewSession;
+      try {
+        updated = await request<InterviewSession>(`/api/interviews/${activeSession.id}/chat`, {
+          method: "POST",
+          body: JSON.stringify({ message: text }),
+        });
+      } catch (err) {
+        if ((err as Error).message.includes("not found")) {
+          await restoreSessionIfNeeded(activeSession);
+          updated = await request<InterviewSession>(`/api/interviews/${activeSession.id}/chat`, {
+            method: "POST",
+            body: JSON.stringify({ message: text }),
+          });
+        } else {
+          throw err;
+        }
+      }
+      cacheSession(updated);
       setActiveSession(updated);
     } catch (error) {
       setNotice({ kind: "error", text: (error as Error).message });
@@ -629,9 +716,22 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
     setBusy(true);
     setNotice(null);
     try {
-      const completed = await request<InterviewSession>(`/api/interviews/${activeSession.id}/complete`, {
-        method: "POST",
-      });
+      let completed: InterviewSession;
+      try {
+        completed = await request<InterviewSession>(`/api/interviews/${activeSession.id}/complete`, {
+          method: "POST",
+        });
+      } catch (err) {
+        if ((err as Error).message.includes("not found")) {
+          await restoreSessionIfNeeded(activeSession);
+          completed = await request<InterviewSession>(`/api/interviews/${activeSession.id}/complete`, {
+            method: "POST",
+          });
+        } else {
+          throw err;
+        }
+      }
+      cacheSession(completed);
       setActiveSession(completed);
       setReport(completed.report);
       await refresh();
@@ -735,6 +835,7 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
                   method: "POST",
                   body: JSON.stringify({ ...config, auto_start: true }),
                 });
+                cacheSession(session);
                 setActiveSession(session);
                 setPage("interview");
                 await refresh();
@@ -755,28 +856,37 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
               setBusy(true);
               setNotice(null);
               try {
-                const result = await request<{ session: InterviewSession; next_action: string }>(
-                  `/api/interviews/${activeSession.id}/answers`,
-                  { method: "POST", body: JSON.stringify({ question_id: questionId, text }) },
-                );
+                let result: { session: InterviewSession; next_action: string };
+                try {
+                  result = await request<{ session: InterviewSession; next_action: string }>(
+                    `/api/interviews/${activeSession.id}/answers`,
+                    { method: "POST", body: JSON.stringify({ question_id: questionId, text }) },
+                  );
+                } catch (err) {
+                  if ((err as Error).message.includes("not found")) {
+                    await restoreSessionIfNeeded(activeSession);
+                    result = await request<{ session: InterviewSession; next_action: string }>(
+                      `/api/interviews/${activeSession.id}/answers`,
+                      { method: "POST", body: JSON.stringify({ question_id: questionId, text }) },
+                    );
+                  } else {
+                    throw err;
+                  }
+                }
+                cacheSession(result.session);
                 setActiveSession(result.session);
                 setNotice({
                   kind: "success",
                   text: result.next_action === "follow_up"
                     ? "Answer saved. Your coach has one follow-up to help you add detail."
                     : result.next_action === "complete"
-                      ? "Answer saved. You’re ready to finish and see your feedback."
-                      : "Answer saved. Here’s the next question.",
+                      ? "Answer saved. You're ready to finish and see your feedback."
+                      : "Answer saved. Here's the next question.",
                 });
                 await refresh();
               } catch (error) {
                 const message = (error as Error).message;
-                try {
-                  setActiveSession(await request<InterviewSession>(`/api/interviews/${activeSession.id}`));
-                  setNotice({ kind: "error", text: `${message} Your answer remains available here; retry when ready.` });
-                } catch (refreshError) {
-                  setNotice({ kind: "error", text: `${message} The session could not be refreshed: ${(refreshError as Error).message}` });
-                }
+                setNotice({ kind: "error", text: `${message} Your answer remains available here; retry when ready.` });
               } finally {
                 setBusy(false);
               }
@@ -784,16 +894,22 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
             onSkip={async () => {
               setBusy(true);
               try {
-                const updated = await request<InterviewSession>(`/api/interviews/${activeSession.id}/skip`, { method: "POST" });
+                let updated: InterviewSession;
+                try {
+                  updated = await request<InterviewSession>(`/api/interviews/${activeSession.id}/skip`, { method: "POST" });
+                } catch (err) {
+                  if ((err as Error).message.includes("not found")) {
+                    await restoreSessionIfNeeded(activeSession);
+                    updated = await request<InterviewSession>(`/api/interviews/${activeSession.id}/skip`, { method: "POST" });
+                  } else {
+                    throw err;
+                  }
+                }
+                cacheSession(updated);
                 setActiveSession(updated);
               } catch (error) {
                 const message = (error as Error).message;
-                try {
-                  setActiveSession(await request<InterviewSession>(`/api/interviews/${activeSession.id}`));
-                  setNotice({ kind: "error", text: `${message} Retry to continue this session.` });
-                } catch (refreshError) {
-                  setNotice({ kind: "error", text: `${message} The session could not be refreshed: ${(refreshError as Error).message}` });
-                }
+                setNotice({ kind: "error", text: `${message} Retry to continue this session.` });
               } finally {
                 setBusy(false);
               }
@@ -860,6 +976,13 @@ function NavItem({ icon, label, active, onClick }: { icon: React.ReactNode; labe
 }
 
 function NoticeBanner({ notice, onDismiss }: { notice: Notice; onDismiss: () => void }) {
+  useEffect(() => {
+    if (notice.kind === "success" || notice.kind === "info") {
+      const timer = setTimeout(onDismiss, 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [notice, onDismiss]);
+
   return (
     <div className={`notice-banner ${notice.kind}`} role={notice.kind === "error" ? "alert" : "status"}>
       {notice.kind === "success" ? <CheckCircle2 size={18} /> : notice.kind === "error" ? <X size={18} /> : <CircleHelp size={18} />}

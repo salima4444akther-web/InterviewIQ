@@ -762,3 +762,49 @@ def test_conversational_interview_lifecycle(tmp_path, monkeypatch):
         assert concluded["report"]["overall_score"] > 0
         assert len(concluded["report"]["scores"]) == len(main.TECHNICAL_DIMENSIONS)
         assert len(concluded["questions"]) == 1
+
+
+def test_restore_interview_session(tmp_path: Path, monkeypatch) -> None:
+    db_file = tmp_path / "restore_test.sqlite3"
+    monkeypatch.setattr(main, "DB_PATH", db_file)
+    main.initialize_database()
+
+    app = main.app
+    app.dependency_overrides[main.require_user] = lambda: {"id": "user-restore-123"}
+
+    with TestClient(app) as client:
+        # 1. Create a session
+        created = client.post(
+            "/api/interviews",
+            json={
+                "role": "Staff Engineer",
+                "interview_type": "Technical",
+                "difficulty": "Advanced",
+                "focus_competency": "System design",
+                "duration_minutes": 25,
+                "mode": "conversational",
+                "ai_consent": False,
+                "auto_start": True,
+            },
+        ).json()
+        session_id = created["id"]
+        assert created["status"] == "active"
+
+        # 2. Simulate new empty lambda container
+        new_db_file = tmp_path / "new_lambda.sqlite3"
+        monkeypatch.setattr(main, "DB_PATH", new_db_file)
+        main.initialize_database()
+
+        # In new container, session is initially 404
+        res404 = client.get(f"/api/interviews/{session_id}")
+        assert res404.status_code == 404
+
+        # 3. Restore session from client state
+        restored = client.post("/api/interviews/restore", json=created)
+        assert restored.status_code == 200
+        assert restored.json()["id"] == session_id
+
+        # 4. Now get succeeds in new container
+        fetched = client.get(f"/api/interviews/{session_id}")
+        assert fetched.status_code == 200
+        assert fetched.json()["id"] == session_id
