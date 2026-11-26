@@ -719,3 +719,46 @@ async def test_supabase_authentication_requires_a_bearer_token(monkeypatch):
     with pytest.raises(main.HTTPException) as error:
         await main.require_user(None)
     assert error.value.status_code == 401
+
+
+def test_conversational_interview_lifecycle(tmp_path, monkeypatch):
+    with make_client(tmp_path, monkeypatch) as client:
+        # 1. Create conversational interview session
+        session = client.post(
+            "/api/interviews",
+            json={
+                "role": "Distributed Systems Engineer",
+                "interview_type": "Technical",
+                "focus_competency": "System design",
+                "duration_minutes": 15,
+                "mode": "conversational",
+                "ai_consent": False,
+            },
+        ).json()
+        assert session["config"]["mode"] == "conversational"
+        assert session["status"] == "draft"
+
+        # 2. Start conversational interview
+        started = client.post(f"/api/interviews/{session['id']}/start").json()
+        assert started["status"] == "active"
+        assert len(started["messages"]) == 1
+        assert started["messages"][0]["role"] == "assistant"
+        assert "System design" in started["messages"][0]["content"]
+
+        # 3. Chat turn: send candidate message
+        chatted = client.post(
+            f"/api/interviews/{session['id']}/chat",
+            json={"message": "I would use Kafka for message queueing and partitioning by key."},
+        ).json()
+        assert len(chatted["messages"]) == 3
+        assert chatted["messages"][1]["role"] == "user"
+        assert chatted["messages"][1]["content"] == "I would use Kafka for message queueing and partitioning by key."
+        assert chatted["messages"][2]["role"] == "assistant"
+
+        # 4. Conclude interview and get scorecard
+        concluded = client.post(f"/api/interviews/{session['id']}/conclude").json()
+        assert concluded["status"] == "completed"
+        assert concluded["report"] is not None
+        assert concluded["report"]["overall_score"] > 0
+        assert len(concluded["report"]["scores"]) == len(main.TECHNICAL_DIMENSIONS)
+        assert len(concluded["questions"]) == 1

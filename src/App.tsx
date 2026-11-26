@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownRight,
   ArrowLeft,
@@ -67,6 +67,13 @@ type InterviewQuestion = {
   skipped: boolean;
   revisions: { text: string; type: string; submitted_at: string; evaluation: Evaluation }[];
 };
+type ChatMessageItem = {
+  id: string;
+  role: "assistant" | "user";
+  content: string;
+  timestamp: string;
+};
+
 type InterviewSession = {
   id: string;
   status: "draft" | "active" | "completed";
@@ -79,11 +86,13 @@ type InterviewSession = {
     duration_minutes: number;
     focus_competency: string;
     ai_consent?: boolean;
+    mode?: "structured" | "conversational";
   };
   question_limit: number;
   primary_question_count: number;
   continuation_pending?: boolean;
   questions: InterviewQuestion[];
+  messages?: ChatMessageItem[];
   report: Report | null;
 };
 type Report = {
@@ -584,6 +593,23 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
     }
   };
 
+  const sendChatMessage = async (text: string) => {
+    if (!activeSession) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const updated = await request<InterviewSession>(`/api/interviews/${activeSession.id}/chat`, {
+        method: "POST",
+        body: JSON.stringify({ message: text }),
+      });
+      setActiveSession(updated);
+    } catch (error) {
+      setNotice({ kind: "error", text: (error as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const completeSession = async () => {
     if (!activeSession) return;
     setBusy(true);
@@ -761,6 +787,7 @@ function AuthenticatedApp({ onSignOut, initialNotice }: { onSignOut: () => Promi
                 setBusy(false);
               }
             }}
+            onSendMessage={sendChatMessage}
             onFinish={completeSession}
             onLeave={() => { setActiveSession(null); navigate("home"); }}
           />
@@ -937,6 +964,7 @@ function SetupPage({ profile, busy, coachStatus, onBack, onStart }: {
   const [interviewType, setInterviewType] = useState<"Behavioral" | "Technical">("Behavioral");
   const [focus, setFocus] = useState("Mixed");
   const [aiConsent, setAiConsent] = useState(false);
+  const [mode, setMode] = useState<"structured" | "conversational">("conversational");
   const [roleError, setRoleError] = useState("");
 
   const submit = (event: React.FormEvent) => {
@@ -953,6 +981,7 @@ function SetupPage({ profile, busy, coachStatus, onBack, onStart }: {
       duration_minutes: duration,
       focus_competency: focus,
       ai_consent: aiConsent,
+      mode,
     });
   };
   const focusOptions = interviewType === "Technical"
@@ -984,6 +1013,26 @@ function SetupPage({ profile, busy, coachStatus, onBack, onStart }: {
         </div>
         <label className="field-label focus-label" htmlFor="focus">{interviewType === "Technical" ? "Technical focus" : "Focus competency"} <span className="optional">(optional)</span></label>
         <div className="select-wrap"><select id="focus" value={focus} onChange={(event) => setFocus(event.target.value)}>{focusOptions.map((option) => <option key={option}>{option}</option>)}</select><ChevronDown size={16} /></div>
+        <div className="form-divider" />
+        <div className="form-section-title"><span className="form-step">03</span><div><h2>Practice format</h2><p>How would you like your interview to feel?</p></div></div>
+        <div className="mode-toggle-group">
+          <button
+            type="button"
+            className={`mode-card ${mode === "conversational" ? "selected" : ""}`}
+            onClick={() => setMode("conversational")}
+          >
+            <div className="mode-header"><MessageCircle size={18} className="mode-icon-accent" /> <span>Conversational Mode</span> <span className="recommended-badge">RECOMMENDED</span></div>
+            <div className="mode-desc">Natural human dialogue. Banter, ask clarifying questions, and discuss trade-offs in real time. Comprehensive scorecard at the end.</div>
+          </button>
+          <button
+            type="button"
+            className={`mode-card ${mode === "structured" ? "selected" : ""}`}
+            onClick={() => setMode("structured")}
+          >
+            <div className="mode-header"><Target size={18} /> <span>Structured Practice</span></div>
+            <div className="mode-desc">Step-by-step interview questions. Get immediate rubric scores and follow-ups after each individual answer.</div>
+          </button>
+        </div>
         {coachStatus?.coach && coachStatus.coach !== "local" ? (
           <div className="coach-consent">
             <label>
@@ -1000,15 +1049,125 @@ function SetupPage({ profile, busy, coachStatus, onBack, onStart }: {
   );
 }
 
-function InterviewPage({ session, profile, busy, onAnswer, onSkip, onFinish, onLeave }: {
+function InterviewPage({ session, profile, busy, onAnswer, onSkip, onSendMessage, onFinish, onLeave }: {
   session: InterviewSession;
   profile: Profile;
   busy: boolean;
   onAnswer: (questionId: string, text: string) => void;
   onSkip: () => void;
+  onSendMessage?: (text: string) => void;
   onFinish: () => void;
   onLeave: () => void;
 }) {
+  const isConversational = session.config.mode === "conversational";
+  const [chatInput, setChatInput] = useState("");
+  const chatStreamRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (chatStreamRef.current) {
+      chatStreamRef.current.scrollTop = chatStreamRef.current.scrollHeight;
+    }
+  }, [session.messages?.length, busy]);
+
+  const handleSendChat = (event?: React.FormEvent) => {
+    if (event) event.preventDefault();
+    if (!chatInput.trim() || busy || !onSendMessage) return;
+    onSendMessage(chatInput.trim());
+    setChatInput("");
+  };
+
+  const insertPromptChip = (chipText: string) => {
+    setChatInput((prev) => (prev ? `${prev} ${chipText}` : chipText));
+  };
+
+  if (isConversational) {
+    const messages = session.messages || [];
+    const userMessageCount = messages.filter((m) => m.role === "user").length;
+    return (
+      <div className="interview-page convo-room">
+        <div className="interview-topline">
+          <button className="back-link" onClick={onLeave}><ArrowLeft size={15} /> Leave interview</button>
+          <span className="live-status"><span /> LIVE INTERVIEW · CONVERSATIONAL MODE</span>
+          <button className="button convo-finish-btn" onClick={onFinish} disabled={busy}>
+            <Sparkles size={15} /> Conclude & Get Scorecard
+          </button>
+        </div>
+
+        <div className="interview-heading">
+          <div>
+            <span className="eyebrow">{session.config.interview_type.toUpperCase()} · {session.config.role.toUpperCase()}</span>
+            <h1>{session.config.interview_type === "Technical" ? "Interactive Technical Discussion" : "Conversational Behavioral Interview"}</h1>
+            <p>Converse naturally with your interviewer. Clarify constraints, debate architecture, and explore trade-offs. Your comprehensive evaluation will be generated upon concluding.</p>
+          </div>
+          <div className="question-count">
+            <strong>{userMessageCount.toString().padStart(2, "0")}</strong>
+            <span> exchanges</span>
+          </div>
+        </div>
+
+        <div className="convo-stream-box" ref={chatStreamRef}>
+          {messages.map((msg) => (
+            <div className={`convo-bubble-row ${msg.role}`} key={msg.id}>
+              <div className="convo-avatar">
+                {msg.role === "assistant" ? <Sparkles size={16} /> : (profile.name?.slice(0, 1).toUpperCase() || "Y")}
+              </div>
+              <div className="convo-bubble-content">
+                <span className="convo-bubble-sender">
+                  {msg.role === "assistant" ? "AI STAFF INTERVIEWER" : "YOU"}
+                </span>
+                <div className="convo-bubble-text">{msg.content}</div>
+              </div>
+            </div>
+          ))}
+
+          {busy && (
+            <div className="convo-typing-indicator">
+              <LoaderCircle className="spin" size={15} />
+              <span>Interviewer is thinking and formulating response…</span>
+            </div>
+          )}
+        </div>
+
+        <form className="convo-composer-card" onSubmit={handleSendChat}>
+          <div className="convo-chip-row">
+            <span className="convo-chip" onClick={() => insertPromptChip("Could you clarify the scale, latency budget, and constraints?")}>
+              💡 Clarify constraints & scale
+            </span>
+            <span className="convo-chip" onClick={() => insertPromptChip("Let me outline my high-level architecture approach:")}>
+              💡 High-level architecture
+            </span>
+            <span className="convo-chip" onClick={() => insertPromptChip("What are the key trade-offs and failure modes to prioritize?")}>
+              💡 Trade-offs & failure modes
+            </span>
+          </div>
+
+          <textarea
+            className="convo-textarea"
+            value={chatInput}
+            onChange={(e) => setChatInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                e.preventDefault();
+                handleSendChat();
+              }
+            }}
+            placeholder="Ask a clarifying question, discuss constraints, or explain your approach (Press Ctrl+Enter or click Send)…"
+            maxLength={5000}
+            disabled={busy}
+          />
+
+          <div className="convo-composer-actions">
+            <span className="composer-help">
+              <Lightbulb size={13} /> Discuss freely. When you are satisfied with your answer, click <strong>Conclude & Get Scorecard</strong>.
+            </span>
+            <button type="submit" className="button button-primary send-button" disabled={busy || !chatInput.trim()}>
+              <Send size={15} /> Send message
+            </button>
+          </div>
+        </form>
+      </div>
+    );
+  }
   const [answer, setAnswer] = useState("");
   const currentQuestion = session.questions[session.questions.length - 1];
   const isWaiting = currentQuestion && !currentQuestion.answer && !currentQuestion.skipped;
@@ -1161,6 +1320,25 @@ function ReportPage({ session, report, onBack, onPracticeAgain, onRevision, onNo
           <div className="example-card"><div className="example-title"><Lightbulb size={17} /> A structure you can borrow</div><p>{report.example}</p><small>Use only details that are true to your experience.</small></div>
         </section>
       </div>
+      {session.messages && session.messages.length > 0 && (
+        <details className="transcript-details" open>
+          <summary><MessageCircle size={16} /> Full Interview Dialogue Transcript ({session.messages.length} messages)</summary>
+          <div className="transcript-body">
+            {session.messages.map((m) => (
+              <div className={`convo-bubble-row ${m.role}`} key={m.id}>
+                <div className="convo-avatar">
+                  {m.role === "assistant" ? <Sparkles size={15} /> : "Y"}
+                </div>
+                <div className="convo-bubble-content">
+                  <span className="convo-bubble-sender">{m.role === "assistant" ? "INTERVIEWER" : "YOU"}</span>
+                  <div className="convo-bubble-text">{m.content}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+
       <section className="panel answer-review">
         <div className="panel-heading"><div><h2>Your answers & evidence</h2><p>See what you said and the specific text that supported your feedback.</p></div></div>
         {report.questions.length === 0 && <p className="no-evaluations">No answers were evaluated in this session, so no scores or coaching suggestions were generated.</p>}

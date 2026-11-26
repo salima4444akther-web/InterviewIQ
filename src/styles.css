@@ -672,3 +672,287 @@ h3 { margin: 0; font-size: 14px; letter-spacing: -.2px; }
   color: #334155;
   white-space: pre-wrap;
 }
+
+/* --- Conversational Mode Styles --- */
+.mode-toggle-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 10px;
+  margin-bottom: 20px;
+}
+
+.mode-card {
+  border: 1.5px solid var(--line);
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 16px;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mode-card:hover {
+  border-color: #b7c8be;
+  background: #fbfdfb;
+}
+
+.mode-card.selected {
+  border-color: var(--green);
+  background: var(--green-light);
+  box-shadow: 0 4px 12px rgba(55, 108, 88, 0.08);
+}
+
+.mode-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.mode-icon-accent {
+  color: var(--green);
+}
+
+.recommended-badge {
+  margin-left: auto;
+  font-size: 9.5px;
+  font-weight: 800;
+  background: #10b981;
+  color: #fff;
+  padding: 2px 7px;
+  border-radius: 99px;
+  letter-spacing: 0.5px;
+}
+
+.mode-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+/* Conversational Room Layout */
+.convo-room {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.convo-stream-box {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  min-height: 420px;
+  max-height: 540px;
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  scroll-behavior: smooth;
+}
+
+.convo-bubble-row {
+  display: flex;
+  gap: 12px;
+  max-width: 85%;
+}
+
+.convo-bubble-row.assistant {
+  align-self: flex-start;
+}
+
+.convo-bubble-row.user {
+  align-self: flex-end;
+  flex-direction: row-reverse;
+}
+
+.convo-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.convo-bubble-row.assistant .convo-avatar {
+  background: var(--green);
+  color: #fff;
+}
+
+.convo-bubble-row.user .convo-avatar {
+  background: #3b82f6;
+  color: #fff;
+}
+
+.convo-bubble-content {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.convo-bubble-row.user .convo-bubble-content {
+  align-items: flex-end;
+}
+
+.convo-bubble-sender {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.3px;
+}
+
+.convo-bubble-text {
+  padding: 12px 16px;
+  border-radius: 14px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.convo-bubble-row.assistant .convo-bubble-text {
+  background: #f4f6f3;
+  color: #1e2925;
+  border-top-left-radius: 3px;
+  border: 1px solid #eef2ed;
+}
+
+.convo-bubble-row.user .convo-bubble-text {
+  background: #2563eb;
+  color: #ffffff;
+  border-top-right-radius: 3px;
+}
+
+.convo-typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: #f8faf8;
+  border: 1px solid #e9eee9;
+  border-radius: 12px;
+  font-size: 12px;
+  color: var(--muted);
+  align-self: flex-start;
+}
+
+.convo-composer-card {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.convo-chip-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.convo-chip {
+  background: #f1f5f2;
+  border: 1px solid #e2e8e3;
+  border-radius: 99px;
+  padding: 4px 12px;
+  font-size: 11.5px;
+  color: #2e3e37;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.convo-chip:hover {
+  background: #e3ece5;
+  border-color: var(--green);
+  color: var(--green-dark);
+}
+
+.convo-textarea {
+  width: 100%;
+  min-height: 72px;
+  max-height: 180px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 13.5px;
+  line-height: 1.55;
+  resize: vertical;
+  background: #fbfdfb;
+}
+
+.convo-textarea:focus {
+  border-color: var(--green);
+  background: #fff;
+  outline: none;
+}
+
+.convo-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.convo-finish-btn {
+  background: #f97316;
+  color: #fff;
+  border: 0;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 12.5px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: background 0.16s ease;
+}
+
+.convo-finish-btn:hover {
+  background: #ea580c;
+}
+
+.transcript-details {
+  margin-top: 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.transcript-details summary {
+  padding: 14px 18px;
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--ink);
+  cursor: pointer;
+  background: #f9faf9;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.transcript-details summary:hover {
+  background: #f3f5f3;
+}
+
+.transcript-body {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 480px;
+  overflow-y: auto;
+}
