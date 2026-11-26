@@ -121,8 +121,10 @@ type ProgressData = {
 type Notice = { kind: "error" | "success" | "info"; text: string };
 type CoachStatus = { coach: "openrouter" | "groq" | "local"; model: string };
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? "";
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() ?? "";
+const supabaseUrl =
+  import.meta.env.VITE_SUPABASE_URL?.trim() || "https://eeqogkmkeuwjwmrcddad.supabase.co";
+const supabaseAnonKey =
+  import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() || "sb_publishable_M_IHffoaILZ3rh5X1zmgLg_qLu9aHnv";
 const apiBaseUrl = (import.meta.env.VITE_API_BASE_URL?.trim() ?? "").replace(/\/+$/, "");
 let apiAccessToken: string | null = null;
 
