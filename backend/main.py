@@ -1055,22 +1055,23 @@ async def create_conversational_opening(session: dict[str, Any]) -> str:
 
     system_prompt = (
         f"You are Alex, an elite, warm, and highly perceptive Staff {'Technical' if technical else 'Behavioral'} Interviewer "
-        f"at a top technology company (like Google or Stripe). "
-        f"Write your live opening greeting and present the opening scenario for the candidate interviewing for {role} "
+        f"at a top technology company (such as Google or Stripe).\n"
+        f"Give a SHORT, punchy opening greeting and present a brief scenario for a candidate interviewing for {role} "
         f"(Focus area: {focus}, Level: {difficulty}).\n\n"
-        "GUIDELINES:\n"
-        "1. Greet the candidate warmly and authentically, introduce yourself (Alex, Staff Interviewer), and state today's focus.\n"
-        "2. Present a compelling, realistic production scenario with concrete constraints tailored to the role and focus.\n"
-        "3. Explicitly invite the candidate to share their initial thoughts, ask clarifying questions, or discuss constraints.\n"
-        "4. Tone must be encouraging, natural, and conversational (1 to 2 focused paragraphs). No bullet lists or robotic templates."
+        "STRICT CONCISENESS RULES:\n"
+        "1. MUST be 2 to 3 sentences only. Do not write multiple long paragraphs or lengthy backstories.\n"
+        "2. Sentence 1: Quick warm greeting introducing yourself as Alex, Staff Interviewer.\n"
+        "3. Sentence 2: State the scenario or challenge in one clear, compelling sentence tailored to the role and focus.\n"
+        "4. Sentence 3: Warmly invite them to begin or ask any questions."
     )
 
     if is_ai_configured() and session["config"].get("ai_consent", True):
         try:
             opening = await call_ai_chat(
                 system_prompt,
-                [{"role": "user", "content": f"Hi Alex, I am ready for our {role} interview focusing on {focus}."}],
-                temperature=0.7,
+                [{"role": "user", "content": f"Hi Alex, let's begin the {difficulty} {interview_type} interview for {role}."}],
+                temperature=0.6,
+                max_tokens=256,
             )
             if opening:
                 return opening
@@ -1079,16 +1080,14 @@ async def create_conversational_opening(session: dict[str, Any]) -> str:
 
     if technical:
         return (
-            f"Hi! Thanks for joining me today. I'm Alex, a Staff Engineer here, and I'm excited to speak with you about the {role} position. "
-            f"Today, we'll explore a real-world scenario focusing on {focus} ({difficulty} level). "
-            "Imagine we need to design a high-throughput, low-latency notification delivery system handling millions of requests per day. "
-            "To begin, how would you approach the high-level architecture, and what clarifying questions do you have about the scale or constraints?"
+            f"Hi! I'm Alex, Staff Engineer here, excited to chat with you today about the {role} role focusing on {focus}. "
+            "To kick things off: imagine we need to build a real-time notification service handling 10M daily events with low latency. "
+            "How would you approach the high-level architecture, or what questions do you have before we begin?"
         )
     return (
-        f"Hi! It's great to meet you today. I'm Alex, and thank you for taking the time to interview for the {role} position. "
-        f"Today we'll be focusing on {focus} and navigating complex engineering team dynamics. "
-        "To kick things off, could you tell me about a time you had to lead a project through significant technical ambiguity or high stakeholder pressure? "
-        "Feel free to set the context and walk me through your thinking."
+        f"Hi! I'm Alex, and I'm really looking forward to speaking with you today for the {role} position focusing on {focus}. "
+        "To start: could you tell me about a time you led a team or project through high technical ambiguity or pressure? "
+        "Whenever you're ready, feel free to briefly set the scene."
     )
 
 
@@ -1101,24 +1100,27 @@ async def generate_conversational_reply(session: dict[str, Any]) -> str:
     technical = is_technical(session)
 
     system_prompt = (
-        f"You are Alex, an elite, highly perceptive, and warm Staff {'Technical' if technical else 'Behavioral'} Interviewer "
+        f"You are Alex, an elite, highly perceptive, warm, and collaborative Staff {'Technical' if technical else 'Behavioral'} Interviewer "
         f"at a premier tech company (such as Google or Stripe). "
         f"You are conducting a live, interactive, conversational interview for the role of {role} "
         f"(Focus Area: {focus}, Level: {difficulty}).\n\n"
-        "INTERVIEWER GUIDELINES:\n"
-        "1. Dynamic, Real-Time Interactivity: Converse naturally like an authentic senior engineer or hiring manager. "
-        "Listen carefully to what the candidate just said and respond directly to their specific words and ideas.\n"
+        "INTERVIEWER CORE PRINCIPLES:\n"
+        "1. Dynamic, Real-Time Interactivity: Converse naturally like a supportive senior principal engineer or hiring manager. "
+        "Actively listen to what the candidate just typed and address their exact words directly.\n"
         "2. Greetings & Salutations: If the candidate says 'hi', 'hello', 'hey', 'good morning', asks how you are, "
-        "or offers any casual greeting, ALWAYS greet them back warmly in your reply (e.g., 'Hello! Great to connect with you today...'), "
-        "introduce yourself, acknowledge their greeting, and ask how they are doing or if they're ready to dive in.\n"
-        "3. Questions & Clarifications: If the candidate asks about requirements, expected scale, constraints, or database schemas, "
-        "provide realistic engineering details and encourage them on how to design around them.\n"
+        "or offers any casual greeting, ALWAYS greet them back warmly, introduce yourself, and ask how they're doing.\n"
+        "3. COOPERATIVE GUIDANCE & HANDLING 'I DON'T KNOW' (CRITICAL RULE):\n"
+        "   - If the candidate says 'I don't know', 'I'm not sure', 'I'm stuck', 'Can you explain?', 'How does that work?', "
+        "or directly asks for guidance/solutions: NEVER tell them 'you should figure this out yourself' or refuse to answer.\n"
+        "   - ALWAYS provide the solution and clearly explain the concept in a practical, understandable way (e.g., explain how idempotency keys, distributed locking, or cache-aside strategies work in production).\n"
+        "   - After explaining the solution, encourage them and invite them to apply it or transition to the next step (e.g. 'Does that make sense? How would you structure that into the next layer of your design?').\n"
+        "   - Act like a senior mentor who unblocks a colleague in a high-level design review.\n"
         "4. Technical & Behavioral Deep-Dive: When the candidate suggests a solution or shares an experience, "
-        "validate what is clever or sound, and then probe the critical trade-offs (e.g. data consistency, caching invalidation, failure recovery, scale, or personal agency).\n"
+        "validate what is clever or sound, and probe the critical trade-offs (e.g. data consistency, caching invalidation, failure recovery, or personal agency).\n"
         "5. Pacing & Tone: Keep your spoken reply concise, natural, and engaging (1 to 2 focused paragraphs). "
         "Never output rigid grading rubrics, JSON tags, or canned textbook answers. Converse genuinely with the candidate.\n"
-        "6. Wrapping Up: When you have covered 4 or more deep technical exchanges and explored the core trade-offs thoroughly, "
-        "warmly let the candidate know they've done a great job exploring the problem and can conclude the session whenever they are ready to review their scorecard."
+        "6. Wrapping Up: When you have covered 4 or more deep exchanges and explored the core trade-offs thoroughly, "
+        "warmly let the candidate know they've done a great job and can conclude the session whenever they are ready to review their scorecard."
     )
 
     if is_ai_configured() and session["config"].get("ai_consent", True):
@@ -1136,6 +1138,20 @@ async def generate_conversational_reply(session: dict[str, Any]) -> str:
             f"I'm excited to explore {focus} with you. How are you doing today? "
             "Whenever you're ready, we can jump into our scenario or address any initial questions you might have!"
         )
+    if any(phrase in lower_user for phrase in ("don't know", "dont know", "not sure", "no idea", "can you explain", "explain this", "how does", "what is", "help me")):
+        if technical:
+            return (
+                "No problem at all! In production systems, a common pattern here is to use an **idempotency key** "
+                "(a unique client-generated UUID sent in the request header) and cache it in Redis with a short TTL. "
+                "When a duplicate request arrives, the server detects the existing key and returns the cached result without re-executing the operation. "
+                "How would you integrate that into your API Gateway or message queue?"
+            )
+        else:
+            return (
+                "That's completely fine! When answering behavioral questions, a great approach is the **STAR method**: "
+                "briefly describe the **Situation**, your specific **Task**, the concrete **Actions** you took, and the measurable **Result**. "
+                "Think of any project or team disagreement where you had to adapt. Would you like to try walking through one using that structure?"
+            )
     return (
         f"That's an interesting point regarding your approach. "
         f"Looking at our {focus} challenge for the {role} position, what key trade-offs around scalability, "

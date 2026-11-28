@@ -1272,6 +1272,9 @@ function InterviewPage({ session, profile, busy, onAnswer, onSkip, onSendMessage
             <span className="convo-chip" onClick={() => insertPromptChip("What are the key trade-offs and failure modes to prioritize?")}>
               💡 Trade-offs & failure modes
             </span>
+            <span className="convo-chip" onClick={() => insertPromptChip("I'm not fully sure about this part. Could you explain the recommended solution or pattern for this?")}>
+              💡 I'm not sure, can you explain?
+            </span>
           </div>
 
           <textarea
